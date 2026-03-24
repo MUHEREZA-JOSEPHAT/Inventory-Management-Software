@@ -129,20 +129,22 @@ class InventoryWidget(QWidget):
     
     def setup_ui(self):
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(20)
         
         # Create header with title
         header = QHBoxLayout()
-        title = QLabel("Inventory Management")
-        title.setStyleSheet("font-size: 24px; font-weight: bold;")
+        title = QLabel("5 ST★R Inventory")
+        title.setStyleSheet("font-size: 26px; font-weight: 800; color: #1c2833;")
         header.addWidget(title)
         header.addStretch()
         layout.addLayout(header)
         
         # Create table
         self.table = QTableWidget()
-        self.table.setColumnCount(5)
+        self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels([
-            "ID", "Product", "Current Stock", "Reorder Point", "Status"
+            "ID", "Product", "Category", "Current Stock", "Reorder Point", "Status"
         ])
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -154,7 +156,10 @@ class InventoryWidget(QWidget):
         header.setSectionResizeMode(2, header.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(3, header.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(4, header.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(5, header.ResizeMode.ResizeToContents)
         
+        self.table.setColumnHidden(0, True) # Hide ID column
+        self.table.verticalHeader().setVisible(False)
         layout.addWidget(self.table)
         
         # Add action buttons
@@ -180,17 +185,9 @@ class InventoryWidget(QWidget):
         self.table.setRowCount(len(products))
         
         for row, product in enumerate(products):
-            # product fields are now in order:
-            # [0] = product_id
-            # [1] = name
-            # [2] = quantity
-            # [3] = price
-            # [4] = reorder_point
-            # [5] = unit
-            # [6] = created_at
-            
             self.table.setItem(row, 0, QTableWidgetItem(str(product[0])))  # ID
             self.table.setItem(row, 1, QTableWidgetItem(product[1]))       # Name
+            self.table.setItem(row, 2, QTableWidgetItem(product[7] if product[7] else "None")) # Category
             
             # Convert quantity to integer for comparison
             quantity = int(product[2])  # quantity
@@ -198,16 +195,31 @@ class InventoryWidget(QWidget):
             
             # Display quantity with unit
             quantity_with_unit = f"{quantity} {product[5]}"  # quantity + unit
-            self.table.setItem(row, 2, QTableWidgetItem(quantity_with_unit))
-            
-            self.table.setItem(row, 3, QTableWidgetItem(str(reorder_point)))
+            self.table.setItem(row, 3, QTableWidgetItem(quantity_with_unit))
+            self.table.setItem(row, 4, QTableWidgetItem(str(reorder_point)))
             
             # Set status based on quantity vs reorder point
             status = "Low Stock" if quantity <= reorder_point else "In Stock"
             status_item = QTableWidgetItem(status)
             if status == "Low Stock":
                 status_item.setForeground(Qt.GlobalColor.red)
-            self.table.setItem(row, 4, status_item)
+            self.table.setItem(row, 5, status_item)
+
+    def filter_data(self, search_term):
+        """Filter table rows based on search term (Name or Category)"""
+        search_term = search_term.lower()
+        for row in range(self.table.rowCount()):
+            name_item = self.table.item(row, 1) # Name
+            cat_item = self.table.item(row, 2)  # Category
+            
+            match = not search_term # Show all if search is empty
+            if not match:
+                if name_item and search_term in name_item.text().lower():
+                    match = True
+                elif cat_item and search_term in cat_item.text().lower():
+                    match = True
+                    
+            self.table.setRowHidden(row, not match)
     
     def get_selected_product(self):
         """Get the currently selected product info"""
@@ -220,8 +232,8 @@ class InventoryWidget(QWidget):
         return {
             'id': int(self.table.item(row, 0).text()),
             'name': self.table.item(row, 1).text(),
-            'quantity': int(self.table.item(row, 2).text().split()[0]),
-            'unit': self.table.item(row, 2).text().split()[1]
+            'quantity': int(self.table.item(row, 3).text().split()[0]),
+            'unit': self.table.item(row, 3).text().split()[1]
         }
     
     def adjust_stock(self):
@@ -258,4 +270,4 @@ class InventoryWidget(QWidget):
             return
         
         dialog = StockMovementDialog(self, product['id'], product['name'])
-        dialog.exec() 
+        dialog.exec()

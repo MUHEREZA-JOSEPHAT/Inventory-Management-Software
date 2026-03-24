@@ -33,13 +33,15 @@ class Sales:
         return False
 
     def get_sales_by_date_range(self, start_date, end_date):
-        """Get sales records within a date range"""
+        """Get sales records within a date range with category names"""
         query = '''
             SELECT s.sale_id, p.name, s.quantity, s.sale_price,
                    s.quantity * s.sale_price as total_amount,
-                   s.sale_date
+                   s.sale_date,
+                   c.name as category_name
             FROM sales s
             JOIN products p ON s.product_id = p.product_id
+            LEFT JOIN categories c ON p.category_id = c.category_id
             WHERE date(s.sale_date) BETWEEN date(?) AND date(?)
             ORDER BY s.sale_date DESC
         '''
@@ -72,15 +74,17 @@ class Sales:
         return result[0] if result else None
 
     def get_top_selling_products(self, limit=10, start_date=None, end_date=None):
-        """Get top selling products by quantity"""
+        """Get top selling products by quantity with category names"""
         query = '''
             SELECT 
                 p.product_id,
                 p.name,
                 SUM(s.quantity) as total_quantity_sold,
-                SUM(s.quantity * s.sale_price) as total_revenue
+                SUM(s.quantity * s.sale_price) as total_revenue,
+                c.name as category_name
             FROM sales s
             JOIN products p ON s.product_id = p.product_id
+            LEFT JOIN categories c ON p.category_id = c.category_id
         '''
         params = []
         
@@ -103,3 +107,45 @@ class Sales:
         params.append(limit)
 
         return self.db.execute_query(query, tuple(params)) 
+
+    def get_daily_sales_trend(self, start_date, end_date):
+        """Get total revenue per day for the selected period"""
+        query = '''
+            SELECT date(sale_date) as day, SUM(quantity * sale_price) as total_revenue
+            FROM sales
+            WHERE date(sale_date) BETWEEN date(?) AND date(?)
+            GROUP BY day
+            ORDER BY day ASC
+        '''
+        return self.db.execute_query(query, (start_date, end_date))
+
+    def get_sales_summary_comparison(self):
+        """Get comparison of current month vs last month performance"""
+        # Current Month
+        curr_query = '''
+            SELECT COUNT(*), SUM(quantity), SUM(quantity * sale_price)
+            FROM sales
+            WHERE strftime('%Y-%m', sale_date) = strftime('%Y-%m', 'now')
+        '''
+        # Last Month
+        prev_query = '''
+            SELECT COUNT(*), SUM(quantity), SUM(quantity * sale_price)
+            FROM sales
+            WHERE strftime('%Y-%m', sale_date) = strftime('%Y-%m', 'now', '-1 month')
+        '''
+        
+        curr = self.db.execute_query(curr_query)[0]
+        prev = self.db.execute_query(prev_query)[0]
+        
+        return {
+            'current': {
+                'transactions': curr[0] or 0,
+                'units': curr[1] or 0,
+                'revenue': curr[2] or 0
+            },
+            'previous': {
+                'transactions': prev[0] or 0,
+                'units': prev[1] or 0,
+                'revenue': prev[2] or 0
+            }
+        }

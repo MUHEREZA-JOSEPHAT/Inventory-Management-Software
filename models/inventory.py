@@ -47,13 +47,15 @@ class Inventory:
         return result[0] if result else None
 
     def get_all_stock_levels(self):
-        """Get stock levels for all products (backed by products table)."""
+        """Get stock levels for all products with category names."""
         query = '''
             SELECT p.product_id, p.name, p.quantity, p.reorder_point,
                    CASE WHEN p.quantity <= p.reorder_point THEN 'Low Stock'
                         ELSE 'In Stock' END as status,
-                   p.unit
+                   p.unit,
+                   c.name as category_name
             FROM products p
+            LEFT JOIN categories c ON p.category_id = c.category_id
             ORDER BY p.name
         '''
         return self.db.execute_query(query)
