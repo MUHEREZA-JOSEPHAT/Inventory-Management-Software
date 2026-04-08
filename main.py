@@ -15,8 +15,7 @@ class AppController:
 
     def start_main_app(self, user_data):
         self.login_window.close()
-        self.main_window = MainWindow()
-        # Set user display name if needed
+        self.main_window = MainWindow(user_data)
         self.main_window.user_label.setText(f"Welcome, {user_data['full_name']}")
         self.main_window.show()
 

@@ -9,6 +9,10 @@ from models.supplier import Supplier
 from models.product import Product
 from models.order import Order
 from models.category import Category
+from .admin_settings_dialog import AdminSettingsDialog
+from .supplier_email_dialog import SupplierEmailDialog
+from .supplier_search_dialog import SupplierSearchDialog
+from services.order_pdf_service import OrderPDFService
 
 class OrderSuppliesDialog(QDialog):
     """Popup to place a new supply order with support for new product entry"""
@@ -230,21 +234,44 @@ class OrderSuppliesDialog(QDialog):
             QMessageBox.warning(self, "Warning", "Cart is empty")
             return
             
-        supplier_id = self.supplier_combo.currentData()
-        success_count = 0
+        # Step 1: Search and Select Supplier
+        search_dlg = SupplierSearchDialog(self)
+        if search_dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+            
+        supplier_id, supplier_name, supplier_email = search_dlg.selected_supplier
         
+        # Step 2: Calculate Grand Total
+        grand_total = sum(item['total'] for item in self.cart_items)
+        
+        # Step 3: Generate Professional PDF
+        try:
+            pdf_path = OrderPDFService.generate_order_pdf(supplier_name, self.cart_items, grand_total)
+        except Exception as e:
+            QMessageBox.critical(self, "PDF Error", f"Failed to generate order document: {e}")
+            return
+
+        # Step 4: Persist Orders to Database
+        success_count = 0
         for item in self.cart_items:
             product_id = item['product_id']
             if item['is_new']:
-                # Create the product first as 'Ordered'
                 product_id = self.product_model.add_product(
                     item['name'], 0, item['price'], 0, item['unit'], item['cat_id'], status='Ordered'
                 )
-                if not product_id:
-                    continue
             
-            if self.order_model.place_order(supplier_id, product_id, item['qty'], item['price']):
+            if product_id and self.order_model.place_order(supplier_id, product_id, item['qty'], item['price']):
                 success_count += 1
+
+        # Step 5: Transition to Communication Hub
+        self.accept() # Close the bulk order window
+        
+        # Open Email Dialog with the PDF pre-attached
+        email_dlg = SupplierEmailDialog(
+            supplier_id, supplier_name, supplier_email, 
+            parent=self.parent(), initial_attachments=[pdf_path]
+        )
+        email_dlg.exec()
                 
         if success_count == len(self.cart_items):
             QMessageBox.information(self, "Success", "All orders placed successfully!")
@@ -381,8 +408,14 @@ class SupplierWidget(QWidget):
         orders_btn.clicked.connect(self.view_orders)
         add_btn.clicked.connect(self.add_supplier)
         
+        # New: Mail Settings for Admin
+        settings_btn = QPushButton(" ⚙️ Mail Settings")
+        settings_btn.setStyleSheet("background-color: #7f8c8d; color: white; padding: 10px 15px; border-radius: 8px; font-weight: bold;")
+        settings_btn.clicked.connect(self.open_mail_settings)
+        
         header.addWidget(title)
         header.addStretch()
+        header.addWidget(settings_btn)
         header.addWidget(order_supplies_btn)
         header.addWidget(orders_btn)
         header.addWidget(add_btn)
@@ -396,6 +429,7 @@ class SupplierWidget(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.doubleClicked.connect(self.edit_selected_supplier)
+        self.table.itemSelectionChanged.connect(self._on_selection_changed)
         
         header_view = self.table.horizontalHeader()
         header_view.setSectionResizeMode(1, header_view.ResizeMode.Stretch)
@@ -411,8 +445,16 @@ class SupplierWidget(QWidget):
         edit_btn.clicked.connect(self.edit_selected_supplier)
         delete_btn.clicked.connect(self.delete_selected_supplier)
         
+        # New: Email Communication Action
+        comm_btn = QPushButton(" 📁 Email Communication")
+        comm_btn.setStyleSheet("QPushButton { background-color: #1a73e8; color: white; padding: 10px 20px; border-radius: 6px; font-weight: bold; } QPushButton:disabled { background-color: #bdc3c7; }")
+        comm_btn.clicked.connect(self.open_communication)
+        comm_btn.setEnabled(False)
+        self.comm_btn = comm_btn
+        
         button_layout.addWidget(edit_btn)
         button_layout.addWidget(delete_btn)
+        button_layout.addWidget(comm_btn)
         button_layout.addStretch()
         layout.addLayout(button_layout)
         
@@ -421,7 +463,12 @@ class SupplierWidget(QWidget):
         self.table.setRowCount(len(suppliers))
         for row, s in enumerate(suppliers):
             for col, val in enumerate(s[:6]):
-                self.table.setItem(row, col, QTableWidgetItem(str(val)))
+                self.table.setItem(row, col, QTableWidgetItem(str(val) if val is not None else ""))
+        self.comm_btn.setEnabled(False)
+
+    def _on_selection_changed(self):
+        """Enable communication button only when a row is selected"""
+        self.comm_btn.setEnabled(self.table.currentRow() >= 0)
                 
     def add_supplier(self):
         dialog = SupplierDialog(self)
@@ -480,3 +527,30 @@ class SupplierWidget(QWidget):
                 self.window().show_success("Supplier deleted.")
             except Exception as e:
                 self.window().show_error(f"Error: {e}")
+
+    def open_mail_settings(self):
+        """Open the admin mail/API configuration dialog"""
+        dialog = AdminSettingsDialog(self)
+        dialog.exec()
+
+    def open_communication(self):
+        """Open the live email exchange for the selected supplier"""
+        row = self.table.currentRow()
+        if row < 0:
+            self.window().show_warning("Please select a supplier to communicate with.")
+            return
+            
+        id_item = self.table.item(row, 0)
+        name_item = self.table.item(row, 1)
+        email_item = self.table.item(row, 4)
+        
+        if not id_item or not name_item or not email_item or not email_item.text().strip():
+            self.window().show_warning("This supplier is missing a valid email address.")
+            return
+            
+        sid = int(id_item.text())
+        name = name_item.text()
+        email = email_item.text()
+        
+        dialog = SupplierEmailDialog(sid, name, email, self)
+        dialog.exec()

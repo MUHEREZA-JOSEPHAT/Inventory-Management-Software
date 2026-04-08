@@ -13,7 +13,7 @@ class Database:
     def connect(self):
         """Establish connection to the database"""
         if self.conn is None:
-            self.conn = sqlite3.connect(self.db_name)
+            self.conn = sqlite3.connect(self.db_name, check_same_thread=False)
             self.cursor = self.conn.cursor()
 
     def disconnect(self):
@@ -215,6 +215,102 @@ class Database:
                 )
             ''')
             
+            # Create customer_orders table (online purchases)
+            self.cursor.execute('''
+                CREATE TABLE IF NOT EXISTS customer_orders (
+                    order_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    customer_name TEXT NOT NULL,
+                    product_id INTEGER NOT NULL,
+                    quantity INTEGER NOT NULL,
+                    total_price REAL NOT NULL,
+                    status TEXT DEFAULT 'New',
+                    is_read INTEGER DEFAULT 0,
+                    order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (product_id) REFERENCES products (product_id)
+                )
+            ''')
+
+            # Create order_chats table (chat linked to a customer order)
+            self.cursor.execute('''
+                CREATE TABLE IF NOT EXISTS order_chats (
+                    message_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    order_id INTEGER NOT NULL,
+                    sender TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    is_read INTEGER DEFAULT 0,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (order_id) REFERENCES customer_orders (order_id)
+                )
+            ''')
+            
+            # Migration: Add is_read column if it doesn't exist
+            try:
+                self.cursor.execute("ALTER TABLE customer_orders ADD COLUMN is_read INTEGER DEFAULT 0")
+            except: pass
+            
+            try:
+                self.cursor.execute("ALTER TABLE order_chats ADD COLUMN is_read INTEGER DEFAULT 0")
+            except: pass
+
+            # Create admin_settings table (for mail APIs and SMTP)
+            self.cursor.execute('''
+                CREATE TABLE IF NOT EXISTS admin_settings (
+                    setting_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    admin_email TEXT,
+                    mail_mode TEXT DEFAULT 'Simulation',
+                    smtp_host TEXT,
+                    smtp_port INTEGER,
+                    smtp_user TEXT,
+                    smtp_pass TEXT,
+                    api_endpoint TEXT,
+                    api_sid TEXT,
+                    api_key TEXT,
+                    imap_host TEXT,
+                    imap_port INTEGER,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+
+            # Create supplier_communications table (email exchange log)
+            self.cursor.execute('''
+                CREATE TABLE IF NOT EXISTS supplier_communications (
+                    comm_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    supplier_id INTEGER NOT NULL,
+                    sender_type TEXT NOT NULL, -- 'Admin' or 'Supplier'
+                    sender_email TEXT,
+                    recipient_email TEXT,
+                    subject TEXT,
+                    message TEXT NOT NULL,
+                    status TEXT DEFAULT 'Sent',
+                    uid TEXT UNIQUE,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (supplier_id) REFERENCES suppliers (supplier_id)
+                )
+            ''')
+            
+            # Ensure is_read exists in supplier_communications
+            try:
+                self.cursor.execute("ALTER TABLE supplier_communications ADD COLUMN is_read INTEGER DEFAULT 0")
+            except: pass
+            
+            # Migration: Ensure settings table is initialized
+            try:
+                self.cursor.execute("ALTER TABLE admin_settings ADD COLUMN api_sid TEXT")
+            except: pass
+            
+            try:
+                self.cursor.execute("ALTER TABLE admin_settings ADD COLUMN imap_host TEXT")
+                self.cursor.execute("ALTER TABLE admin_settings ADD COLUMN imap_port INTEGER")
+            except: pass
+
+            try:
+                self.cursor.execute("ALTER TABLE supplier_communications ADD COLUMN uid TEXT")
+            except: pass
+            
+            self.cursor.execute("SELECT COUNT(*) FROM admin_settings")
+            if self.cursor.fetchone()[0] == 0:
+                self.cursor.execute("INSERT INTO admin_settings (admin_email) VALUES ('admin@supermarket.com')")
+            
             # Default admin
             self.cursor.execute("SELECT COUNT(*) FROM users")
             if self.cursor.fetchone()[0] == 0:
@@ -224,6 +320,25 @@ class Database:
                     "INSERT INTO users (username, password_hash, full_name, role) VALUES (?, ?, ?, ?)",
                     ("admin", admin_pass, "System Administrator", "admin")
                 )
+
+            # Insert dummy customer orders if empty
+            self.cursor.execute("SELECT COUNT(*) FROM customer_orders")
+            if self.cursor.fetchone()[0] == 0:
+                # Get a product or insert a dummy one
+                self.cursor.execute("SELECT product_id, price FROM products LIMIT 1")
+                product = self.cursor.fetchone()
+                if product:
+                    pid, pprice = product
+                    dummy_orders = [
+                        ("Alice Johnson", pid, 2, pprice * 2, "New"),
+                        ("Bob Smith", pid, 1, pprice * 1, "In Progress"),
+                        ("Charlie Davis", pid, 5, pprice * 5, "Completed")
+                    ]
+                    for order in dummy_orders:
+                        self.cursor.execute(
+                            "INSERT INTO customer_orders (customer_name, product_id, quantity, total_price, status) VALUES (?, ?, ?, ?, ?)",
+                            order
+                        )
 
             self.conn.commit()
         except Exception as e:

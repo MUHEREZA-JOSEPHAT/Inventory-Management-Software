@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit,
     QPushButton, QLabel, QStackedWidget, QMessageBox,
-    QFrame, QGraphicsDropShadowEffect
+    QFrame, QGraphicsDropShadowEffect, QComboBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QColor, QIcon, QPixmap
@@ -128,6 +128,11 @@ class AuthWidget(QWidget):
         self.reg_confirm_pass.setEchoMode(QLineEdit.EchoMode.Password)
         layout.addWidget(self.reg_confirm_pass)
         
+        self.reg_role = QComboBox()
+        self.reg_role.addItems(["Worker", "Admin"])
+        self.reg_role.setObjectName("role-combo")
+        layout.addWidget(self.reg_role)
+        
         register_btn = QPushButton("Create Account")
         register_btn.setObjectName("primary-btn")
         register_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -176,7 +181,7 @@ class AuthWidget(QWidget):
                 color: #7f8c8d;
                 margin-bottom: 25px;
             }
-            QLineEdit {
+            QLineEdit, QComboBox {
                 padding: 16px;
                 border: 1px solid #e1e8ed;
                 border-radius: 10px;
@@ -184,7 +189,7 @@ class AuthWidget(QWidget):
                 font-size: 14px;
                 color: #2c3e50;
             }
-            QLineEdit:focus {
+            QLineEdit:focus, QComboBox:focus {
                 border: 2px solid #2575fc;
                 background-color: white;
             }
@@ -237,7 +242,8 @@ class AuthWidget(QWidget):
             return
             
         try:
-            self.db.create_user(self.reg_user.text(), self.reg_pass.text(), self.reg_full_name.text())
+            role = self.reg_role.currentText().lower()
+            self.db.create_user(self.reg_user.text(), self.reg_pass.text(), self.reg_full_name.text(), role)
             QMessageBox.information(self, "Success", "Registered! Proceed to login.")
             self.form_container.setCurrentIndex(0)
         except Exception as e:
